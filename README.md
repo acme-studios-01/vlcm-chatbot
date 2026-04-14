@@ -2,8 +2,6 @@
 
 A simple, ready-to-deploy chatbot template powered by Cloudflare Workers AI. It ships with a clean chat UI, streaming responses, a default `@cf/moonshotai/kimi-k2.5` model configuration, and optional AI Gateway support for observability and guardrails.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/templates/tree/main/llm-chat-app-template)
-
 Before publishing, update the deploy button above so it points to your GitHub repository.
 
 <!-- dash-content-start -->
@@ -139,8 +137,8 @@ The frontend is a simple HTML/CSS/JavaScript application that:
 2. Sends user messages to the API
 3. Processes streaming responses in real-time
 4. Preserves safe conversation history between turns
-5. Excludes previously blocked prompt text from future requests for more stable guardrail behavior
-6. Shows inline status messages for blocked prompts and failed requests
+5. Excludes previously blocked prompt text from future requests for more stable prompt-block handling
+6. Shows inline status messages for blocked prompts and failed requests, including custom JSON responses returned by edge security rules
 
 ## Customization
 
@@ -151,6 +149,8 @@ To use a different AI model, update `modelId` in `src/config.ts`. You can find a
 ### Using AI Gateway
 
 AI Gateway is optional. If a gateway ID is configured, requests will be routed through AI Gateway before reaching Workers AI.
+
+In this app, AI Gateway is primarily used for observability, logging, and request tracing. Edge blocking for prompt injection, PII, and unsafe topics is handled separately with Cloudflare AI Security for Apps.
 
 To enable AI Gateway:
 
@@ -164,19 +164,25 @@ To enable AI Gateway:
 
 To disable AI Gateway, set `gateway.id` back to an empty string and redeploy.
 
-### Guardrails and False Positives
+### Using AI Security for Apps
 
-If you enable AI Gateway Guardrails, the app will show inline status messages when prompts or responses are blocked.
+This app is designed to work with Cloudflare AI Security for Apps to block risky prompts at the edge before they reach the Worker.
 
-For a stable demo setup, a practical configuration is:
+You can use it to block:
 
-- `Prompt Injection / Jailbreaks`: `Flag`
-- `Hate`: `Block`
-- `Violence`: `Block`
+- PII in prompts
+- Unsafe topics
+- Prompt injection attempts
 
-This reduces false positives while still letting you demonstrate policy enforcement.
+When WAF custom rules return JSON error payloads, the frontend parses those responses and renders inline chat status messages for the blocked category.
 
-Learn more about [AI Gateway](https://developers.cloudflare.com/ai-gateway/).
+Relevant docs:
+
+- [AI Security for Apps overview](https://developers.cloudflare.com/waf/detections/ai-security-for-apps/)
+- [AI Security for Apps fields](https://developers.cloudflare.com/waf/detections/ai-security-for-apps/fields/)
+- [PII detection](https://developers.cloudflare.com/waf/detections/ai-security-for-apps/pii-detection/)
+- [Prompt injection detection](https://developers.cloudflare.com/waf/detections/ai-security-for-apps/prompt-injection/)
+- [Unsafe and custom topic detection](https://developers.cloudflare.com/waf/detections/ai-security-for-apps/unsafe-topics/)
 
 ### Modifying the System Prompt
 
@@ -193,12 +199,13 @@ Before pushing or demoing, verify the following:
 1. `npm run dev` starts correctly
 2. Normal prompts stream correctly in the chat UI
 3. If AI Gateway is enabled, requests appear in AI Gateway logs
-4. If Guardrails are enabled, blocked prompts show an inline status message instead of a generic crash
+4. If AI Security for Apps rules are enabled, blocked prompts show an inline status message instead of a generic crash
 5. Harmless follow-up prompts continue to work after a blocked turn
 
 ## Resources
 
 - [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
 - [Cloudflare AI Gateway Documentation](https://developers.cloudflare.com/ai-gateway/)
+- [Cloudflare AI Security for Apps Documentation](https://developers.cloudflare.com/waf/detections/ai-security-for-apps/)
 - [Cloudflare Workers AI Documentation](https://developers.cloudflare.com/workers-ai/)
 - [Workers AI Models](https://developers.cloudflare.com/workers-ai/models/)
