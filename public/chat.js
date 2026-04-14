@@ -23,6 +23,7 @@ let appConfig = {
 	greeting: "Hi! How can I help you today?",
 	composerPlaceholder: "Type a message…",
 	modelId: "@cf/moonshotai/kimi-k2.5",
+	requestContext: "latest",
 	mode: "direct",
 	gatewayConfigured: false,
 	gatewayId: null,
@@ -105,7 +106,7 @@ async function sendMessage() {
 	hideStatus();
 
 	addMessageToChat("user", message, { persist: false });
-	const requestMessages = [...getRequestHistory(), { role: "user", content: message }];
+	const requestMessages = getRequestMessages(message);
 
 	try {
 		// Create new assistant response element
@@ -315,6 +316,14 @@ function addMessageToChat(role, content, options = {}) {
 	return { rowEl, cardEl, textEl };
 }
 
+function getRequestMessages(message) {
+	if (appConfig.requestContext === "latest") {
+		return [{ role: "user", content: message }];
+	}
+
+	return [...getRequestHistory(), { role: "user", content: message }];
+}
+
 function getRequestHistory() {
 	return chatHistory.filter(
 		(entry) =>
@@ -406,12 +415,40 @@ function handleApiError(payload, userMessage) {
 	const mode = payload?.meta?.mode || appConfig.mode;
 	const gatewayId = payload?.meta?.gatewayId || appConfig.gatewayId;
 
-	if (mode === "direct" || mode === "gateway") {
+	if (mode === "direct" || mode === "gateway" || mode === "waf") {
 		appConfig.mode = mode;
 		appConfig.gatewayId = gatewayId || null;
 	}
 
 	switch (code) {
+		case "pii_blocked":
+			hideStatus();
+			addMessageToChat(
+				"notice",
+				payload?.error?.message ||
+					"This message was blocked because it may contain sensitive personal information.",
+				{ persist: false, tone: "danger" },
+			);
+			break;
+		case "prompt_injection_blocked":
+			rememberBlockedUser(userMessage);
+			hideStatus();
+			addMessageToChat(
+				"notice",
+				payload?.error?.message ||
+					"This message was blocked because it looks like a prompt injection attempt.",
+				{ persist: false, tone: "danger" },
+			);
+			break;
+		case "unsafe_topic_blocked":
+			hideStatus();
+			addMessageToChat(
+				"notice",
+				payload?.error?.message ||
+					"This message was blocked because it matches an unsafe topic policy.",
+				{ persist: false, tone: "danger" },
+			);
+			break;
 		case "guardrail_prompt_blocked":
 			rememberBlockedUser(userMessage);
 			hideStatus();

@@ -4,6 +4,7 @@ export const APP_CONFIG = {
   greeting: "Hi! How can I help you today?",
   composerPlaceholder: "Type a message…",
   modelId: "@cf/moonshotai/kimi-k2.5",
+  requestContext: "latest",
   systemPrompt:
     "You are a helpful, concise, and trustworthy assistant. Provide accurate answers, keep the tone warm, friendly, and professional, and say clearly when you are uncertain.",
   maxTokens: 4096,
@@ -37,6 +38,7 @@ export function getPublicConfig() {
     greeting: APP_CONFIG.greeting,
     composerPlaceholder: APP_CONFIG.composerPlaceholder,
     modelId: APP_CONFIG.modelId,
+    requestContext: APP_CONFIG.requestContext,
     mode: gateway ? "gateway" : "direct",
     gatewayConfigured: Boolean(gateway),
     gatewayId: gateway?.id ?? null,

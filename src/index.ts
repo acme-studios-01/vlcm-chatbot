@@ -71,7 +71,9 @@ async function handleChatRequest(
         messages: ChatMessage[];
         blockedUserContents?: string[];
       };
-    const sanitizedMessages = sanitizeMessages(messages, blockedUserContents);
+    const sanitizedMessages = shapeRequestMessages(
+      sanitizeMessages(messages, blockedUserContents),
+    );
 
     if (!sanitizedMessages.some((msg) => msg.role === "user")) {
       return jsonError(
@@ -165,6 +167,18 @@ function sanitizeMessages(
     )
     .filter((message) => message.content.length > 0)
     .slice(-24);
+}
+
+function shapeRequestMessages(messages: ChatMessage[]) {
+  if (APP_CONFIG.requestContext !== "latest") {
+    return messages;
+  }
+
+  const latestUserMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === "user");
+
+  return latestUserMessage ? [latestUserMessage] : [];
 }
 
 function getResponseHeaders() {

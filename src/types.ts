@@ -22,10 +22,15 @@ export interface ChatMessage {
   content: string;
 }
 
-export type ChatMode = "direct" | "gateway";
+export type ChatMode = "direct" | "gateway" | "waf";
+
+export type RequestContextMode = "history" | "latest";
 
 export type ApiErrorCode =
   | "bad_request"
+  | "pii_blocked"
+  | "prompt_injection_blocked"
+  | "unsafe_topic_blocked"
   | "guardrail_prompt_blocked"
   | "guardrail_response_blocked"
   | "gateway_error"
@@ -37,6 +42,7 @@ export interface PublicAppConfig {
   greeting: string;
   composerPlaceholder: string;
   modelId: string;
+  requestContext: RequestContextMode;
   mode: ChatMode;
   gatewayConfigured: boolean;
   gatewayId: string | null;
