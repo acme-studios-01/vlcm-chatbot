@@ -6,18 +6,29 @@
 
 // DOM elements
 const chatMessages = document.getElementById("chat-messages");
+const appTitle = document.getElementById("app-title");
+const appSubtitle = document.getElementById("app-subtitle");
 const userInput = document.getElementById("user-input");
 const sendButton = document.getElementById("send-button");
 const typingIndicator = document.getElementById("typing-indicator");
+const statusBanner = document.getElementById("status-banner");
+const statusTitle = document.getElementById("status-title");
+const statusMessage = document.getElementById("status-message");
+const statusDismiss = document.getElementById("status-dismiss");
 
 // Chat state
-let chatHistory = [
-	{
-		role: "assistant",
-		content:
-			"Hello! I'm an LLM chat app powered by Cloudflare Workers AI. How can I help you today?",
-	},
-];
+let appConfig = {
+	title: "Chatbot",
+	subtitle: "Ask anything.",
+	greeting: "Hi! How can I help you today?",
+	composerPlaceholder: "Type a message…",
+	modelId: "@cf/moonshotai/kimi-k2.5",
+	mode: "direct",
+	gatewayConfigured: false,
+	gatewayId: null,
+};
+let chatHistory = [];
+const blockedUserContents = [];
 let isProcessing = false;
 
 // Auto-resize textarea as user types
@@ -36,6 +47,40 @@ userInput.addEventListener("keydown", function (e) {
 
 // Send button click handler
 sendButton.addEventListener("click", sendMessage);
+statusDismiss.addEventListener("click", hideStatus);
+
+initialize();
+
+async function initialize() {
+	applyConfig(appConfig);
+	addMessageToChat("assistant", appConfig.greeting, { persist: false });
+
+	try {
+		const response = await fetch("/api/config");
+
+		if (!response.ok) {
+			throw new Error("Failed to load app configuration");
+		}
+
+		const config = await response.json();
+		appConfig = {
+			...appConfig,
+			...config,
+		};
+		applyConfig(appConfig);
+		chatMessages.innerHTML = "";
+		chatHistory = [];
+		addMessageToChat("assistant", appConfig.greeting, { persist: false });
+	} catch (error) {
+		console.error("Failed to load config:", error);
+		showStatus({
+			tone: "warning",
+			title: "Temporary setup issue",
+			message:
+				"The chat loaded with its built-in defaults because configuration could not be fetched.",
+		});
+	}
+}
 
 /**
  * Sends a message to the chat API and processes the response
@@ -51,29 +96,24 @@ async function sendMessage() {
 	userInput.disabled = true;
 	sendButton.disabled = true;
 
-	// Add user message to chat
-	addMessageToChat("user", message);
-
 	// Clear input
 	userInput.value = "";
 	userInput.style.height = "auto";
 
 	// Show typing indicator
 	typingIndicator.classList.add("visible");
+	hideStatus();
 
-	// Add message to history
-	chatHistory.push({ role: "user", content: message });
+	addMessageToChat("user", message, { persist: false });
+	const requestMessages = [...getRequestHistory(), { role: "user", content: message }];
 
 	try {
 		// Create new assistant response element
-		const assistantMessageEl = document.createElement("div");
-		assistantMessageEl.className = "message assistant-message";
-		assistantMessageEl.innerHTML = "<p></p>";
-		chatMessages.appendChild(assistantMessageEl);
-		const assistantTextEl = assistantMessageEl.querySelector("p");
+		const assistantMessage = addMessageToChat("assistant", "", { persist: false });
+		assistantMessage.textEl.classList.add("empty");
 
 		// Scroll to bottom
-		chatMessages.scrollTop = chatMessages.scrollHeight;
+		scrollChatToBottom();
 
 		// Send request to API
 		const response = await fetch("/api/chat", {
@@ -82,13 +122,18 @@ async function sendMessage() {
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({
-				messages: chatHistory,
+				messages: requestMessages,
+				blockedUserContents,
 			}),
 		});
+		updateModeFromHeaders(response.headers);
 
 		// Handle errors
 		if (!response.ok) {
-			throw new Error("Failed to get response");
+			const payload = await parseApiError(response);
+			assistantMessage.rowEl.remove();
+			handleApiError(payload, message);
+			return;
 		}
 		if (!response.body) {
 			throw new Error("Response body is null");
@@ -100,8 +145,9 @@ async function sendMessage() {
 		let responseText = "";
 		let buffer = "";
 		const flushAssistantText = () => {
-			assistantTextEl.textContent = responseText;
-			chatMessages.scrollTop = chatMessages.scrollHeight;
+			assistantMessage.textEl.textContent = responseText;
+			assistantMessage.textEl.classList.toggle("empty", responseText.length === 0);
+			scrollChatToBottom();
 		};
 
 		let sawDone = false;
@@ -175,13 +221,29 @@ async function sendMessage() {
 
 		// Add completed response to chat history
 		if (responseText.length > 0) {
+			chatHistory.push({ role: "user", content: message });
 			chatHistory.push({ role: "assistant", content: responseText });
+			assistantMessage.textEl.classList.remove("empty");
+		} else {
+			assistantMessage.rowEl.remove();
+			addMessageToChat(
+				"notice",
+				"The assistant finished without returning visible text.",
+				{ persist: false, tone: "danger" },
+			);
 		}
 	} catch (error) {
 		console.error("Error:", error);
+		showStatus({
+			tone: "danger",
+			title: "Request failed",
+			message:
+				"The assistant could not complete your request right now. Please try again in a moment.",
+		});
 		addMessageToChat(
-			"assistant",
-			"Sorry, there was an error processing your request.",
+			"notice",
+			"The assistant could not complete your request right now. Please try again in a moment.",
+			{ persist: false },
 		);
 	} finally {
 		// Hide typing indicator
@@ -198,14 +260,69 @@ async function sendMessage() {
 /**
  * Helper function to add message to chat
  */
-function addMessageToChat(role, content) {
-	const messageEl = document.createElement("div");
-	messageEl.className = `message ${role}-message`;
-	messageEl.innerHTML = `<p>${content}</p>`;
-	chatMessages.appendChild(messageEl);
+function addMessageToChat(role, content, options = {}) {
+	const persist = options.persist ?? false;
+	const tone = options.tone ?? "neutral";
+	const rowEl = document.createElement("div");
+	rowEl.className = `message-row ${role}`;
+	if (role === "notice") {
+		rowEl.dataset.tone = tone;
+	}
 
-	// Scroll to bottom
-	chatMessages.scrollTop = chatMessages.scrollHeight;
+	if (role !== "notice") {
+		const avatarEl = document.createElement("div");
+		avatarEl.className = "message-avatar";
+		avatarEl.textContent = role === "user" ? "YOU" : "AI";
+		rowEl.appendChild(avatarEl);
+	}
+
+	const cardEl = document.createElement("div");
+	cardEl.className = "message-card";
+
+	const metaEl = document.createElement("div");
+	metaEl.className = "message-meta";
+
+	const labelEl = document.createElement("span");
+	labelEl.textContent =
+		role === "user"
+			? "You"
+			: role === "assistant"
+				? "Assistant"
+				: "Status";
+
+	const timestampEl = document.createElement("span");
+	timestampEl.textContent = new Date().toLocaleTimeString([], {
+		hour: "numeric",
+		minute: "2-digit",
+	});
+
+	metaEl.append(labelEl, timestampEl);
+
+	const textEl = document.createElement("div");
+	textEl.className = "message-text";
+	textEl.textContent = content;
+
+	cardEl.append(metaEl, textEl);
+	rowEl.appendChild(cardEl);
+	chatMessages.appendChild(rowEl);
+
+	if (persist && (role === "user" || role === "assistant")) {
+		chatHistory.push({ role, content });
+	}
+
+	scrollChatToBottom();
+
+	return { rowEl, cardEl, textEl };
+}
+
+function getRequestHistory() {
+	return chatHistory.filter(
+		(entry) =>
+			!(
+				entry.role === "user" &&
+				blockedUserContents.includes(entry.content)
+			),
+	);
 }
 
 function consumeSseEvents(buffer) {
@@ -227,4 +344,136 @@ function consumeSseEvents(buffer) {
 		events.push(dataLines.join("\n"));
 	}
 	return { events, buffer: normalized };
+}
+
+function applyConfig(config) {
+	appTitle.textContent = config.title;
+	appSubtitle.textContent = config.subtitle;
+	userInput.placeholder = config.composerPlaceholder;
+}
+
+function updateModeFromHeaders(headers) {
+	const mode = headers.get("x-chatbot-mode");
+	const gatewayId = headers.get("x-chatbot-gateway") || null;
+
+	if (mode === "direct" || mode === "gateway") {
+		appConfig.mode = mode;
+		appConfig.gatewayId = gatewayId || null;
+	}
+}
+
+function showStatus({ tone, title, message }) {
+	statusBanner.dataset.tone = tone;
+	statusTitle.textContent = title;
+	statusMessage.textContent = message;
+	statusBanner.hidden = false;
+}
+
+function hideStatus() {
+	statusBanner.hidden = true;
+	statusBanner.dataset.tone = "";
+	statusTitle.textContent = "";
+	statusMessage.textContent = "";
+}
+
+async function parseApiError(response) {
+	try {
+		const payload = await response.json();
+		if (payload && payload.error) {
+			return payload;
+		}
+	} catch (error) {
+		console.error("Failed to parse API error payload:", error);
+	}
+
+	return {
+		error: {
+			code: "ai_error",
+			message: "The assistant could not complete the request.",
+			retryable: true,
+			phase: null,
+		},
+		meta: {
+			mode: appConfig.mode,
+			modelId: appConfig.modelId,
+			gatewayId: appConfig.gatewayId,
+		},
+	};
+}
+
+function handleApiError(payload, userMessage) {
+	const code = payload?.error?.code;
+	const mode = payload?.meta?.mode || appConfig.mode;
+	const gatewayId = payload?.meta?.gatewayId || appConfig.gatewayId;
+
+	if (mode === "direct" || mode === "gateway") {
+		appConfig.mode = mode;
+		appConfig.gatewayId = gatewayId || null;
+	}
+
+	switch (code) {
+		case "guardrail_prompt_blocked":
+			rememberBlockedUser(userMessage);
+			hideStatus();
+			addMessageToChat(
+				"notice",
+				"This message was blocked by the chat's safety settings.",
+				{ persist: false, tone: "danger" },
+			);
+			break;
+		case "guardrail_response_blocked":
+			hideStatus();
+			addMessageToChat(
+				"notice",
+				"The response was blocked by the chat's safety settings.",
+				{ persist: false, tone: "danger" },
+			);
+			break;
+		case "gateway_error":
+			showStatus({
+				tone: "danger",
+				title: "Connection issue",
+				message:
+					"The chat could not complete this request right now. Please try again.",
+			});
+			addMessageToChat(
+				"notice",
+				"The chat could not complete this request right now. Please try again.",
+				{ persist: false, tone: "danger" },
+			);
+			break;
+		default:
+			showStatus({
+				tone: "danger",
+				title: "Assistant unavailable",
+				message:
+					payload.error.message ||
+					"The assistant could not complete your request right now. Please try again shortly.",
+			});
+			addMessageToChat(
+				"notice",
+				payload.error.message ||
+					"The assistant could not complete your request right now. Please try again shortly.",
+				{ persist: false, tone: "danger" },
+			);
+	}
+}
+
+function rememberBlockedUser(text) {
+	if (!text || blockedUserContents.includes(text)) {
+		return;
+	}
+
+	blockedUserContents.push(text);
+
+	if (blockedUserContents.length > 20) {
+		blockedUserContents.shift();
+	}
+}
+
+function scrollChatToBottom() {
+	chatMessages.scrollTo({
+		top: chatMessages.scrollHeight,
+		behavior: "smooth",
+	});
 }
