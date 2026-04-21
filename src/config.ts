@@ -3,7 +3,7 @@ export const APP_CONFIG = {
   subtitle: "Ask anything.",
   greeting: "Hi! How can I help you today?",
   composerPlaceholder: "Type a message…",
-  modelId: "@cf/moonshotai/kimi-k2.5",
+  modelId: "@cf/zai-org/glm-4.7-flash",
   requestContext: "latest",
   systemPrompt:
     "You are a helpful, concise, and trustworthy assistant. Provide accurate answers, keep the tone warm, friendly, and professional, and say clearly when you are uncertain.",
